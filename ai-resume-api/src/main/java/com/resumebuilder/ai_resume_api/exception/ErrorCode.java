@@ -1,0 +1,36 @@
+package com.resumebuilder.ai_resume_api.exception;
+
+public enum ErrorCode {
+    // Domain
+    USER_EXISTS,
+    USER_NOT_FOUND,
+    EMAIL_NOT_VERIFIED,
+
+    // Auth/Security
+    AUTHENTICATION_REQUIRED,
+    FORBIDDEN,
+    BAD_CREDENTIALS,
+    ACCOUNT_DISABLED,
+    ACCOUNT_LOCKED,
+    ACCOUNT_EXPIRED,
+    CREDENTIALS_EXPIRED,
+
+    // Validation/Input
+    VALIDATION_ERROR,
+    JSON_PARSE_ERROR,
+    TYPE_MISMATCH,
+    METHOD_NOT_ALLOWED,
+    UNSUPPORTED_MEDIA_TYPE,
+    NOT_ACCEPTABLE,
+
+    // Data/DB
+    DUPLICATE_KEY,
+    NOT_NULL_VIOLATION,
+    FOREIGN_KEY_VIOLATION,
+    CHECK_VIOLATION,
+    OPTIMISTIC_LOCK,
+    STALE_OBJECT,
+
+    // Generic
+    INTERNAL_ERROR
+}

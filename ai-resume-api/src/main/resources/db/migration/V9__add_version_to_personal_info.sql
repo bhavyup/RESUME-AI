@@ -1,0 +1,1 @@
+ALTER TABLE personal_info ADD COLUMN IF NOT EXISTS version BIGINT;

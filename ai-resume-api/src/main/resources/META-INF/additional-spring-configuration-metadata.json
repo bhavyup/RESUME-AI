@@ -1,0 +1,5 @@
+{"properties": [{
+  "name": "security.registration.require-email-verification",
+  "type": "java.lang.String",
+  "description": "A description for 'security.registration.require-email-verification'"
+}]}

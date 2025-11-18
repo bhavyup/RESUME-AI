@@ -1,0 +1,389 @@
+## Security Package Files
+
+AccessTokenBlocklist.java
+```java
+package com.resumebuilder.ai_resume_api.security;
+
+public interface AccessTokenBlocklist {
+    void revoke(String jti, java.time.Instant expiresAt);
+
+    boolean isRevoked(String jti);
+}
+```
+
+AuthEventsListener.java
+```java
+package com.resumebuilder.ai_resume_api.security;
+
+import com.resumebuilder.ai_resume_api.repository.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
+import org.springframework.security.authentication.event.AuthenticationFailureBadCredentialsEvent;
+import org.springframework.security.authentication.event.AuthenticationSuccessEvent;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+
+@Component
+public class AuthEventsListener {
+    private static final Logger log = LoggerFactory.getLogger(AuthEventsListener.class);
+    private static final int MAX_ATTEMPTS = 5;
+    private static final long LOCK_MINUTES = 15;
+
+    private final UserRepository userRepository;
+
+    public AuthEventsListener(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+
+    @EventListener
+    @Transactional
+    public void onFailure(AuthenticationFailureBadCredentialsEvent event) {
+        Object principal = event.getAuthentication().getPrincipal();
+        if (principal instanceof String raw) {
+            String username = raw.trim().toLowerCase();
+            userRepository.findByUsername(username).ifPresent(user -> {
+                int attempts = user.getFailedLoginAttempts() + 1;
+                user.setFailedLoginAttempts(attempts);
+                if (attempts >= MAX_ATTEMPTS) {
+                    user.setAccountNonLocked(false);
+                    user.setLockedUntil(Instant.now().plusSeconds(LOCK_MINUTES * 60));
+                    log.warn("User {} locked until {}", username, user.getLockedUntil());
+                }
+                userRepository.save(user);
+            });
+        }
+    }
+
+    @EventListener
+    @Transactional
+    public void onSuccess(AuthenticationSuccessEvent event) {
+        Object principal = event.getAuthentication().getPrincipal();
+        if (principal instanceof com.resumebuilder.ai_resume_api.security.UserPrincipal up) {
+            userRepository.findById(up.getId()).ifPresent(user -> {
+                user.setFailedLoginAttempts(0);
+                if (user.getLockedUntil() != null && user.getLockedUntil().isBefore(Instant.now())) {
+                    user.setAccountNonLocked(true);
+                    user.setLockedUntil(null);
+                }
+                userRepository.save(user);
+            });
+        }
+    }
+}
+```
+
+CompositePasswordEncoder.java
+```java
+package com.resumebuilder.ai_resume_api.security;
+
+import org.springframework.security.crypto.password.PasswordEncoder;
+
+public class CompositePasswordEncoder implements PasswordEncoder {
+    private final PasswordEncoder primary;
+    private final PasswordEncoder fallback;
+
+    public CompositePasswordEncoder(PasswordEncoder primary, PasswordEncoder fallback) {
+        this.primary = primary;
+        this.fallback = fallback;
+    }
+
+    @Override
+    public String encode(CharSequence rawPassword) {
+        return primary.encode(rawPassword);
+    }
+
+    @Override
+    public boolean matches(CharSequence rawPassword, String encodedPassword) {
+        if (encodedPassword == null)
+            return false;
+        if (primary.matches(rawPassword, encodedPassword))
+            return true;
+        return fallback.matches(rawPassword, encodedPassword);
+    }
+}
+```
+
+InMemoryAccessTokenBlocklist.java
+```java
+package com.resumebuilder.ai_resume_api.security;
+
+import com.github.benmanes.caffeine.cache.*;
+import org.springframework.stereotype.Service;
+import java.time.Instant;
+import java.util.concurrent.TimeUnit;
+
+@Service
+public class InMemoryAccessTokenBlocklist implements AccessTokenBlocklist {
+    private final Cache<String, Long> cache = Caffeine.newBuilder()
+            .expireAfter(new Expiry<String, Long>() {
+                @Override
+                public long expireAfterCreate(String key, Long expMillis, long currentTimeNanos) {
+                    long ttlMillis = Math.max(expMillis - System.currentTimeMillis(), 0);
+                    return TimeUnit.MILLISECONDS.toNanos(ttlMillis);
+                }
+
+                @Override
+                public long expireAfterUpdate(String key, Long value, long currentTimeNanos,
+                        long currentDurationNanos) {
+                    return currentDurationNanos;
+                }
+
+                @Override
+                public long expireAfterRead(String key, Long value, long currentTimeNanos, long currentDurationNanos) {
+                    return currentDurationNanos;
+                }
+            })
+            .maximumSize(200_000)
+            .build();
+
+    @Override
+    public void revoke(String jti, Instant expiresAt) {
+        cache.put(jti, expiresAt.toEpochMilli());
+    }
+
+    @Override
+    public boolean isRevoked(String jti) {
+        return cache.getIfPresent(jti) != null;
+    }
+}
+```
+
+SecurityUtil.java
+```java
+package com.resumebuilder.ai_resume_api.security;
+
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+public final class SecurityUtil {
+    private SecurityUtil() {
+    }
+
+    public static String currentUsername() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth != null ? auth.getName() : null;
+    }
+
+    public static Long currentUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof UserPrincipal up) {
+            return up.getId();
+        }
+        return null;
+    }
+}
+```
+
+SSEAuthTokenService.java
+```java
+package com.resumebuilder.ai_resume_api.security;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Base64;
+
+@Service
+public class SSEAuthTokenService {
+
+    private final byte[] secret;
+
+    public SSEAuthTokenService(
+            @Value("${application.jwt.secret-base64}") String base64Secret) {
+        this.secret = Base64.getDecoder().decode(base64Secret);
+    }
+
+    public String issue(String username, Long resumeId, long ttlSeconds) {
+        long exp = Instant.now().getEpochSecond() + ttlSeconds;
+        String payload = "u=" + safe(username) + ";r=" + resumeId + ";exp=" + exp;
+        String sig = sign(payload);
+        return base64Url(payload) + "." + sig;
+    }
+
+    public boolean validate(String token, String expectedUser, Long expectedResumeId) {
+        try {
+            String[] parts = token.split("\\.");
+            if (parts.length != 2)
+                return false;
+            String payload = new String(Base64.getUrlDecoder().decode(parts[0]), StandardCharsets.UTF_8);
+            String sig = parts[1];
+
+            if (!sign(payload).equals(sig))
+                return false;
+
+            String username = extract(payload, "u");
+            Long resumeId = Long.valueOf(extract(payload, "r"));
+            long exp = Long.parseLong(extract(payload, "exp"));
+            if (Instant.now().getEpochSecond() > exp)
+                return false;
+
+            if (expectedUser != null && !expectedUser.equals(username))
+                return false;
+            if (expectedResumeId != null && !expectedResumeId.equals(resumeId))
+                return false;
+
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private String extract(String payload, String key) {
+        for (String part : payload.split(";")) {
+            String[] kv = part.split("=", 2);
+            if (kv.length == 2 && kv[0].equals(key))
+                return kv[1];
+        }
+        return null;
+    }
+
+    private String base64Url(String s) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(s.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String sign(String payload) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret, "HmacSHA256"));
+            byte[] sig = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(sig);
+        } catch (Exception e) {
+            throw new IllegalStateException("SSE token signing failed", e);
+        }
+    }
+
+    private String safe(String v) {
+        return v == null ? "" : v.replace(";", "").replace("=", "");
+    }
+}
+```
+
+UserPrincipal.java
+```java
+package com.resumebuilder.ai_resume_api.security;
+
+import com.resumebuilder.ai_resume_api.entity.UserEntity;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+
+import java.util.Collection;
+
+public class UserPrincipal implements UserDetails {
+    private final Long id;
+    private final String username;
+    private final String password;
+    private final boolean enabled;
+    private final boolean accountNonLocked;
+    private final boolean accountNonExpired;
+    private final boolean credentialsNonExpired;
+    private final Collection<? extends GrantedAuthority> authorities;
+
+    public UserPrincipal(Long id,
+            String username,
+            String password,
+            boolean enabled,
+            boolean accountNonLocked,
+            boolean accountNonExpired,
+            boolean credentialsNonExpired,
+            Collection<? extends GrantedAuthority> authorities) {
+        this.id = id;
+        this.username = username;
+        this.password = password;
+        this.enabled = enabled;
+        this.accountNonLocked = accountNonLocked;
+        this.accountNonExpired = accountNonExpired;
+        this.credentialsNonExpired = credentialsNonExpired;
+        this.authorities = authorities;
+    }
+
+    public static UserPrincipal from(UserEntity u) {
+        return new UserPrincipal(
+                u.getId(),
+                u.getUsername(),
+                u.getPassword(),
+                u.isEnabled(),
+                u.isAccountNonLocked(),
+                u.isAccountNonExpired(),
+                u.isCredentialsNonExpired(),
+                u.getAuthorities() == null ? java.util.List.of() : u.getAuthorities());
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return authorities;
+    }
+
+    @Override
+    public String getPassword() {
+        return password;
+    }
+
+    @Override
+    public String getUsername() {
+        return username;
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return accountNonExpired;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return accountNonLocked;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return credentialsNonExpired;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+}
+```
+
+UserUnlockScheduler.java
+```java
+package com.resumebuilder.ai_resume_api.security;
+
+import com.resumebuilder.ai_resume_api.repository.UserRepository;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+@Component
+public class UserUnlockScheduler {
+    private final UserRepository userRepository;
+
+    public UserUnlockScheduler(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+
+    @Scheduled(fixedDelay = 60000)
+    @Transactional
+    public void unlockUsers() {
+        var now = java.time.Instant.now();
+        var users = userRepository.findByAccountNonLockedFalseAndLockedUntilBefore(now);
+        users.forEach(u -> {
+            u.setAccountNonLocked(true);
+            u.setLockedUntil(null);
+            u.setFailedLoginAttempts(0);
+        });
+        userRepository.saveAll(users);
+    }
+}
+```

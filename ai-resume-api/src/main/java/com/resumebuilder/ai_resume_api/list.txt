@@ -1,0 +1,3 @@
+service/resume/TalkService
+service/resume/ReferenceService
+service/resume/VolunteeringService

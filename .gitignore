@@ -1,0 +1,14 @@
+docs/
+resume-builder-frontend/
+.vscode/
+.idea/
+ResumeAI-Revolutionizing-Resume-Building-with-AI.pptx
+
+.env.local
+.env.example
+
+application.properties
+application-dev.properties
+
+ai-resume-api/src/main/resources/application.properties
+ai-resume-api/src/main/resources/application-dev.properties
