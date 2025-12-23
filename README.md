@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![ResumeAI Logo](public/og.webp)
+![ResumeAI Logo](/resume-ai-main/public/resumeai-logo.png)
 
 **🚀 The AI-Powered Resume Builder That Gets You Hired**
 
@@ -30,7 +30,7 @@
 ## ✨ Key Features & Screenshots
 
 ### 🤖 AI-Powered Resume Assistant
-![AI Resume Assistant](public/SS%20Chat.png)
+![AI Resume Assistant](/resume-ai-main/public/SS%20Chat.png)
 
 **90% More Effective Bullet Points**
 - Smart content suggestions based on your experience
@@ -39,14 +39,14 @@
 - ATS-friendly formatting and keyword optimization
 
 ### 📊 Beautiful Resume Dashboard
-![Resume Dashboard](public/Dashboard%20Image.png)
+![Resume Dashboard](/resume-ai-main/public/Dashboard%20Image.png)
 
 **Organize Your Entire Job Search**
 - Centralized resume management system
 - Create base resumes and tailored versions
 
 ### 📈 Resume Performance Scoring
-![Resume Scoring](public/SS%20Score.png)
+![Resume Scoring](/resume-ai-main/public/SS%20Score.png)
 
 **3x Higher Response Rates**
 - ATS compatibility scoring and analysis
@@ -55,7 +55,7 @@
 - Performance metrics and analytics
 
 ### 📝 AI Cover Letter Generator
-![Cover Letter Generator](public/SS%20Cover%20Letter.png)
+![Cover Letter Generator](/resume-ai-main/public/SS%20Cover%20Letter.png)
 
 **Save 30+ Minutes Per Application**
 - Tailored to match specific job requirements
@@ -128,7 +128,7 @@ ResumeAI is built with a mobile-first approach, ensuring your resume building ex
 1. **Clone the repository**
 ```bash
 git clone https://github.com/bhavyup/RESUME-AI.git
-cd resume-lm
+cd resume-ai-main
 ```
 
 2. **Install dependencies**
@@ -244,13 +244,13 @@ Visit `http://localhost:3000` to see your local ResumeAI instance!
 
 ## 🔮 Roadmap & Future Features
 
-### Short Term (Q1 2025)
+### Short Term (Q4 2025)
 - [ ] Enhanced AI tailoring algorithms
 - [ ] Additional resume templates and themes
 - [ ] Advanced PDF customization options
 - [ ] Job application tracking system
 
-### Long Term (2025)
+### Long Term (2026)
 - [ ] LinkedIn integration and sync
 - [ ] Interview preparation tools
 - [ ] Salary negotiation guidance
@@ -313,7 +313,7 @@ For businesses requiring proprietary licenses or commercial support, please cont
 **Ready to land your dream job?**
 
 [![Get Started Free](https://img.shields.io/badge/🚀_Get_Started_Free-ResumeAI.com-blue?style=for-the-badge&color=6366f1)](https://ResumeAI.com)
-[![View Source Code](https://img.shields.io/badge/📚_View_Source-GitHub-black?style=for-the-badge&logo=github)](https://github.com/bhavyup/RESUME-AI/tree/master)
+[![View Source Code](https://img.shields.io/badge/📚_View_Source-GitHub-black?style=for-the-badge&logo=github)](https://github.com/bhavyup/RESUME-AI/)
 
 **Built with ❤️ using Next.js**
 

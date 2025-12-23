@@ -97,7 +97,7 @@ export default async function LoginPage({
                 <div className="space-y-8">
                   {/* GitHub Badge */}
                   <a
-                    href="https://github.com/bhavyup/RESUME-AI/tree/master"
+                    href="https://github.com/bhavyup/RESUME-AI/"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full 

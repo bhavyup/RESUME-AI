@@ -292,7 +292,7 @@ const FeatureHighlights = () => {
               </button>
             </AuthDialog>
             <Link 
-              href="https://github.com/bhavyup/RESUME-AI/tree/master" 
+              href="https://github.com/bhavyup/RESUME-AI/" 
               target="_blank"
               rel="noopener noreferrer"
               className="px-8 py-4 rounded-lg bg-slate-800/80 border border-slate-600/40 text-lg font-medium transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"

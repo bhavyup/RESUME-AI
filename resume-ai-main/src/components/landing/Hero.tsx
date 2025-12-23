@@ -51,7 +51,7 @@ export function Hero() {
             </button>
           </AuthDialog>
           <Link 
-            href="https://github.com/bhavyup/RESUME-AI/tree/master" 
+            href="https://github.com/bhavyup/RESUME-AI/" 
             target="_blank"
             rel="noopener noreferrer"
             className="px-6 py-3 rounded-lg bg-slate-800/50 border border-slate-700 text-slate-300 font-medium transition-all duration-300 hover:bg-slate-800 hover:border-slate-600 hover:-translate-y-1 backdrop-blur-sm"
