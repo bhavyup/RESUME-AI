@@ -23,6 +23,7 @@ import { ResumePDFDocument } from "./resume-pdf-document";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { Loader2, AlertTriangle } from "lucide-react";
 import { useGoogleFonts, FontCapabilities } from "@/hooks/use-google-fonts";
+import { cn } from "@/lib/utils";
 
 // Import required CSS for react-pdf
 import "react-pdf/dist/Page/TextLayer.css";
@@ -131,32 +132,30 @@ export const ResumePreview = memo(
     variant = "base",
     containerWidth,
   }: ResumePreviewProps) {
-    const [url, setUrl] = useState<string | null>(null);
+    // --- STATE MANAGEMENT FOR DOUBLE BUFFERING ---
+    const [activeUrl, setActiveUrl] = useState<string | null>(null);
+    const [frozenUrl, setFrozenUrl] = useState<string | null>(null);
+    const [isTransitioning, setIsTransitioning] = useState(false);
+
     const [numPages, setNumPages] = useState<number>(0);
     const debouncedResume = useDebouncedValue(resume, 800);
     const debouncedWidth = useDebouncedValue(containerWidth, 100);
     const [isPending, startTransition] = useTransition();
 
-    // --- 1. INTEGRATE GOOGLE FONTS HOOK ---
+    // Font Loading
     const { loadFontForPDF, fontList } = useGoogleFonts();
     const [isFontReady, setIsFontReady] = useState(false);
     const [isError, setIsError] = useState(false);
     const [fontCapabilities, setFontCapabilities] =
       useState<FontCapabilities | null>(null);
 
-    // Get the requested font from settings
     const requestedFont =
       resume.document_settings?.document_font_family || "Helvetica";
 
-    // --- 2. LOAD FONT EFFECT ---
+    // --- FONT EFFECT ---
     useEffect(() => {
       const initFont = async () => {
-        // Standard fonts are always ready
-        if (
-          requestedFont === "Helvetica" ||
-          requestedFont === "Times-Roman" ||
-          requestedFont === "Courier"
-        ) {
+        if (["Helvetica", "Times-Roman", "Courier"].includes(requestedFont)) {
           setFontCapabilities(null);
           setIsFontReady(true);
           return;
@@ -175,20 +174,20 @@ export const ResumePreview = memo(
           }
         }
       };
-
       initFont();
     }, [requestedFont, fontList, loadFontForPDF]);
 
-    // Convert percentage to pixels based on parent container
     const getPixelWidth = useCallback(() => {
       if (typeof window === "undefined") return 0;
       return debouncedWidth;
     }, [debouncedWidth]);
 
-    // Generate resume hash for caching
-    const resumeHash = useMemo(() => generateResumeHash(debouncedResume), [debouncedResume]);
+    // Use debouncedResume for hash to avoid rapid cache misses
+    const resumeHash = useMemo(
+      () => generateResumeHash(debouncedResume),
+      [debouncedResume]
+    );
 
-    // Add styles to document head
     useEffect(() => {
       const styleElement = document.createElement("style");
       styleElement.innerHTML = customStyles;
@@ -198,27 +197,27 @@ export const ResumePreview = memo(
       };
     }, []);
 
-    // Generate or retrieve PDF from cache
+    // --- PDF GENERATION EFFECT ---
     useEffect(() => {
-      // --- 3. BLOCK GENERATION IF FONT NOT READY ---
       if (!isFontReady) return;
 
-      let currentUrl: string | null = null;
-
       async function generatePDF() {
-        // Check cache first - do this synchronously for instant load
-        // Note: We might want to invalidate cache if font changed, but hash includes settings so it's safe
+        // 1. Check Cache
         const cached = pdfCache.get(resumeHash);
         if (cached) {
-          currentUrl = cached.url;
-          setUrl(cached.url);
-          setIsError(false);
+          if (cached.url !== activeUrl) {
+            setIsTransitioning(true); // Start fade transition
+            setActiveUrl(cached.url);
+            setIsError(false);
+          }
           return;
         }
 
-        // Generate new PDF if not in cache - wrap in startTransition for non-blocking
+        // 2. Generate New
         startTransition(async () => {
           try {
+            setIsTransitioning(true); // Start fade transition
+
             const blob = await pdf(
               <ResumePDFDocument
                 resume={debouncedResume}
@@ -226,12 +225,11 @@ export const ResumePreview = memo(
                 fontCapabilities={fontCapabilities}
               />
             ).toBlob();
-            const newUrl = URL.createObjectURL(blob);
-            currentUrl = newUrl;
 
-            // Store in cache with timestamp
+            const newUrl = URL.createObjectURL(blob);
+
             pdfCache.set(resumeHash, { url: newUrl, timestamp: Date.now() });
-            setUrl(newUrl);
+            setActiveUrl(newUrl);
             setIsError(false);
           } catch (error) {
             console.error("PDF Generation failed", error);
@@ -240,42 +238,23 @@ export const ResumePreview = memo(
         });
       }
 
-      startTransition(() => {
-        generatePDF();
-      });
+      generatePDF();
 
-      // Cleanup function
-      return () => {
-        if (currentUrl && !pdfCache.has(resumeHash)) {
-          URL.revokeObjectURL(currentUrl);
-        }
-      };
-    }, [resumeHash, variant, debouncedResume, isFontReady, fontCapabilities]); // Added isFontReady
+      // Note: We deliberately rely on GC or cache expiration for cleanup
+      // to avoid revoking the URL while it's still being cross-faded.
+    }, [resumeHash, variant, debouncedResume, isFontReady, fontCapabilities]);
 
-    // Cleanup on component unmount
-    useEffect(() => {
-      return () => {
-        // Final cleanup of this component's URL if not in cache
-        if (url && !pdfCache.has(resumeHash)) {
-          URL.revokeObjectURL(url);
-        }
-      };
-    }, [resumeHash, url]);
-
-    // Add state for text layer visibility
-    const [shouldRenderTextLayer, setShouldRenderTextLayer] = useState(false);
-
-    // Modify Page component to conditionally render text layer
+    // --- HANDLE PAGE LOAD SUCCESS (THE SWAP) ---
     function onDocumentLoadSuccess({ numPages }: { numPages: number }): void {
       setNumPages(numPages);
-      // Enable text layer after document is stable
-      setTimeout(() => setShouldRenderTextLayer(true), 1000);
-    }
 
-    // Disable text layer during updates
-    useEffect(() => {
-      setShouldRenderTextLayer(false);
-    }, [resumeHash, variant]);
+      // The new PDF is ready in the DOM.
+      // Wait a tiny bit for the canvas to paint, then update the frozen layer.
+      setTimeout(() => {
+        setFrozenUrl(activeUrl);
+        setIsTransitioning(false); // Fade in complete
+      }, 150);
+    }
 
     if (isError) {
       return (
@@ -303,7 +282,7 @@ export const ResumePreview = memo(
     }
 
     // Show loading state while PDF is being generated OR FONT IS LOADING
-    if (!url || isPending || !isFontReady) {
+    if ((!activeUrl && !frozenUrl) || !isFontReady) {
       return (
         <div className="w-full aspect-[8.5/11] bg-white shadow-lg p-8">
           <div className="space-y-0 animate-pulse">
@@ -336,46 +315,64 @@ export const ResumePreview = memo(
     return (
       <div className=" h-full relative bg-black/15 overflow-y-auto">
         {/* Loading Overlay for updates */}
-        {isPending && (
+        {(isPending || isTransitioning) && (
           <div className="absolute top-4 right-4 z-50 bg-black/70 backdrop-blur-sm px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg transition-all duration-300">
             <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
             <span className="text-xs font-medium text-white">Updating...</span>
           </div>
         )}
 
-        <Document
-          file={url}
-          onLoadSuccess={onDocumentLoadSuccess}
-          className="relative h-full flex flex-col items-center p-4"
-          externalLinkTarget="_blank"
-          loading={null}
-          error={
-            <div className="flex items-center justify-center h-full text-red-500 text-sm">
-              Failed to load preview.
+        <div className="relative min-h-full flex flex-col items-center p-4">
+          {/* LAYER 1: FROZEN (BACKGROUND) */}
+          {/* This stays visible while the new one loads */}
+          {frozenUrl && (
+            <div className="absolute inset-0 z-0 flex flex-col items-center p-4 pointer-events-none">
+              <Document file={frozenUrl} loading={null}>
+                {Array.from(new Array(numPages), (_, index) => (
+                  <Page
+                    key={`frozen_page_${index + 1}`}
+                    pageNumber={index + 1}
+                    className="mb-4 shadow-xl bg-white"
+                    width={getPixelWidth()}
+                    renderTextLayer={false}
+                    renderAnnotationLayer={false}
+                  />
+                ))}
+              </Document>
             </div>
-          }
-        >
-          {Array.from(new Array(numPages), (_, index) => (
-            <Page
-              key={`page_${index + 1}`}
-              pageNumber={index + 1}
-              className="mb-4 shadow-xl bg-white"
-              width={getPixelWidth()}
-              renderAnnotationLayer={true}
-              renderTextLayer={shouldRenderTextLayer}
-              onRenderError={(error) => {
-                if (error.name !== "AbortException") {
-                  console.error("PDF Page Render Error:", error);
-                }
-              }}
-            />
-          ))}
-        </Document>
+          )}
+
+          {/* LAYER 2: ACTIVE (FOREGROUND) */}
+          {/* This fades in over the old one */}
+          <div
+            className={cn(
+              "relative z-10 transition-opacity duration-300",
+              isTransitioning ? "opacity-0" : "opacity-100"
+            )}
+          >
+            <Document
+              file={activeUrl}
+              onLoadSuccess={onDocumentLoadSuccess}
+              loading={null}
+              externalLinkTarget="_blank"
+            >
+              {Array.from(new Array(numPages), (_, index) => (
+                <Page
+                  key={`page_${index + 1}`}
+                  pageNumber={index + 1}
+                  className="mb-4 shadow-xl bg-white"
+                  width={getPixelWidth()}
+                  renderAnnotationLayer={true}
+                  renderTextLayer={!isTransitioning} // Only render text when stable
+                />
+              ))}
+            </Document>
+          </div>
+        </div>
       </div>
     );
   },
   (prevProps, nextProps) => {
-    // Custom comparison function to determine if re-render is needed
     return (
       prevProps.resume === nextProps.resume &&
       prevProps.variant === nextProps.variant &&

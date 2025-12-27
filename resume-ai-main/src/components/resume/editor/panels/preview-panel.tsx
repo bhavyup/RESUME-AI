@@ -8,7 +8,7 @@ import dynamic from "next/dynamic";
 import { Loader2 } from "lucide-react";
 
 const ResumePreview = dynamic(
-  () => import("../preview/resume-preview").then((mod) => mod.ResumePreview),
+  () => import("../preview/resume-html-preview").then((mod) => mod.ResumePreview),
   {
     ssr: false,
     loading: () => (
